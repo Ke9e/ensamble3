@@ -697,6 +697,7 @@ let lejanoMode   = false;
 let umbralMode   = false;
 let showGuides   = true;
 let showOverflow = false;
+let bgLight      = false;
 let gridAxes     = { colX: [], rowY: [] };
 let todoMode      = true;
 
@@ -875,11 +876,11 @@ function render() {
   ctx.clearRect(0, 0, W, H);
 
   // Fondo
-  ctx.fillStyle = '#090b0e';
+  ctx.fillStyle = bgLight ? '#f7f5f0' : '#090b0e';
   ctx.fillRect(0, 0, W, H);
 
   // Grid punteada sutil
-  ctx.fillStyle = 'rgba(255,255,255,0.04)';
+  ctx.fillStyle = bgLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.04)';
   const gs = 32;
   for (let x = 0; x < W; x += gs) for (let y = 0; y < H; y += gs) {
     ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI*2); ctx.fill();
@@ -887,7 +888,7 @@ function render() {
 
   // Recuadre del canvas — siempre visible, línea fina
   ctx.save();
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.strokeStyle = bgLight ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.18)';
   ctx.lineWidth = 0.8;
   ctx.strokeRect(0.4, 0.4, W - 0.8, H - 0.8);
   ctx.restore();
@@ -895,7 +896,7 @@ function render() {
   // Líneas guía (ejes de la grilla)
   if (showGuides && gridAxes.colX.length) {
     ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.52)';
+    ctx.strokeStyle = bgLight ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.52)';
     ctx.lineWidth   = 0.7;
     ctx.setLineDash([5, 9]);
     for (const x of gridAxes.colX) {
@@ -938,13 +939,6 @@ function render() {
     );
     grad.addColorStop(0, tcol + 'cc');
     grad.addColorStop(1, tcol + '44');
-
-    // Sombra sutil
-    ctx.strokeStyle = tcol + '12';
-    ctx.lineWidth = strokeW * 4.5;
-    ctx.beginPath();
-    c.pts.forEach((p,i) => i===0 ? ctx.moveTo(p.x,p.y) : ctx.lineTo(p.x,p.y));
-    ctx.stroke();
 
     // Línea principal
     ctx.strokeStyle = grad;
@@ -1208,6 +1202,12 @@ document.getElementById('overflowToggle').addEventListener('click', () => {
   showOverflow = !showOverflow;
   document.getElementById('overflowTrack').classList.toggle('on', showOverflow);
   applyCanvasSize();
+  render();
+});
+
+document.getElementById('bgToggle').addEventListener('click', () => {
+  bgLight = !bgLight;
+  document.getElementById('bgTrack').classList.toggle('on', bgLight);
   render();
 });
 
