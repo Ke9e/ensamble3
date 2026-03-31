@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -n \"TODO\\\\|FIXME\\\\|BUG\\\\|ERROR\\\\|HACK\\\\|XXX\" /Users/kede/Downloads/Ensamble2/*.js)",
-      "Bash(gh pr:*)"
-    ]
-  }
-}
