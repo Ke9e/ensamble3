@@ -149,11 +149,11 @@ function drawRulers() {
   const pxPerCmY = visH / hCm;
 
   const RULER_H  = 20;
-  const COL_BG   = 'rgba(9,11,14,0.94)';
-  const COL_TK   = 'rgba(255,255,255,0.14)';   // ticks silenciosos
-  const COL_TK_M = 'rgba(255,255,255,0.22)';   // tick major (cada 5cm)
-  const COL_AX   = 'rgba(255,255,255,0.7)';    // tick de eje activo
-  const COL_AX_N = 'rgba(255,255,255,0.55)';   // número del eje
+  const COL_BG   = bgLight ? 'rgba(42,46,53,0.94)'  : 'rgba(9,11,14,0.94)';
+  const COL_TK   = bgLight ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.14)';
+  const COL_TK_M = bgLight ? 'rgba(255,255,255,0.32)' : 'rgba(255,255,255,0.22)';
+  const COL_AX   = bgLight ? 'rgba(255,255,255,0.75)' : 'rgba(255,255,255,0.7)';
+  const COL_AX_N = bgLight ? 'rgba(255,255,255,0.60)' : 'rgba(255,255,255,0.55)';
   const FONT_AX  = "7.5px 'DM Mono', monospace"; // números de ejes — pequeños
 
   // ── Ruler superior ──────────────────────────────────────────────
@@ -527,31 +527,31 @@ const CURVE_FNS = {
 //
 // La normal se calcula punto a punto sobre la curva real → la forma del
 // desvío hereda la geometría de la curva base, no solo la cuerda recta.
+// Perfil de offset por tipo — t va de 0 a 1 dentro de su mitad.
+// Función global para ser accesible desde deviationPts y makeFloatShape.
+function profile(type, t, sv) {
+  switch(type) {
+    case 'bezier':     return Math.sin(t * Math.PI * 0.5);
+    case 'arc':        return Math.sqrt(t);
+    case 'angular':    return t;
+    case 'sine':       return Math.sin(t * Math.PI * 0.5);
+    case 'irregular':  return t + (noise1((sv||17) + t*3.1)*2-1)*0.22*Math.sin(t*Math.PI);
+    case 'catenary':   return 1 - (Math.cosh((t*2-1)*1.4)-1)/(Math.cosh(1.4)-1);
+    case 'spiral':     return t * (1 + 0.35*Math.sin(t*Math.PI*4));
+    case 'clothoid':   return t*t;
+    case 'lissajous':  return Math.abs(Math.sin(t * Math.PI * 2));
+    case 'epitrochoid':return t + 0.28*Math.sin(t*Math.PI*5)*(1-t);
+    case 'pursuit':    return Math.pow(t, 0.45);
+    default:           return Math.sin(t * Math.PI * 0.5);
+  }
+}
+
 function deviationPts(segPts, amplitude, typeA, typeB, seedVal, peakT) {
   const count = segPts.length;
   if (count < 2) return segPts.slice();
   const pk  = peakT ?? 0.5;
   const sv  = seedVal || 17;
   const pts = [];
-
-  // Perfil de offset por tipo — determina cómo evoluciona la distancia
-  // perpendicular en cada mitad. t va de 0 a 1 dentro de su mitad.
-  const profile = (type, t) => {
-    switch(type) {
-      case 'bezier':     return Math.sin(t * Math.PI * 0.5);           // arranque suave, llega curvo
-      case 'arc':        return Math.sqrt(t);                           // arranque rápido, techo plano
-      case 'angular':    return t;                                       // rampa lineal pura
-      case 'sine':       return Math.sin(t * Math.PI * 0.5);           // igual a bezier pero con ripple abajo
-      case 'irregular':  return t + (noise1(sv + t*3.1)*2-1)*0.22*Math.sin(t*Math.PI); // suave con variación
-      case 'catenary':   return 1 - (Math.cosh((t*2-1)*1.4)-1)/(Math.cosh(1.4)-1);    // cóncavo — se hunde antes del pico
-      case 'spiral':     return t * (1 + 0.35*Math.sin(t*Math.PI*4));  // oscila mientras sube
-      case 'clothoid':   return t*t;                                    // cuadrático — lento al inicio
-      case 'lissajous':  return Math.abs(Math.sin(t * Math.PI * 2));   // dos picos menores antes del pico real
-      case 'epitrochoid':return t + 0.28*Math.sin(t*Math.PI*5)*(1-t); // bucles pequeños en el borde
-      case 'pursuit':    return Math.pow(t, 0.45);                     // muy rápido al inicio, se aplana
-      default:           return Math.sin(t * Math.PI * 0.5);
-    }
-  };
 
   for (let i = 0; i < count; i++) {
     const tGlobal = i / (count - 1);
@@ -569,16 +569,119 @@ function deviationPts(segPts, amplitude, typeA, typeB, seedVal, peakT) {
     let off;
     if (tGlobal <= pk) {
       const tLocal = tGlobal / pk;                         // 0→1 en la mitad de salida
-      off = amplitude * profile(typeA, tLocal);
+      off = amplitude * profile(typeA, tLocal, sv);
     } else {
-      const tLocal = (tGlobal - pk) / (1 - pk);           // 0→1 en la mitad de vuelta
-      off = amplitude * profile(typeB, 1 - tLocal);        // espeja: baja desde el pico
+      const tLocal = (tGlobal - pk) / (1 - pk);
+      off = amplitude * profile(typeB, 1 - tLocal, sv);
     }
 
     pts.push({
       x: segPts[i].x + nx * off,
       y: segPts[i].y + ny * off,
     });
+  }
+  return pts;
+}
+
+// Genera una forma geométrica/biomorfa centrada en (cx,cy) orientada al vector tangente tx/ty
+function makeFloatShape(cx, cy, size, tx, ty, nx, ny, type, sv) {
+  const pts = [];
+  switch (type) {
+    case 'disco': {
+      const rx = size;
+      const ry = size * (0.38 + noise1(sv) * 0.48);
+      const rot = noise1(sv + 1.1) * Math.PI;
+      const cr = Math.cos(rot), sr = Math.sin(rot);
+      for (let i = 0; i < 36; i++) {
+        const a  = (i / 36) * Math.PI * 2;
+        const ex = Math.cos(a) * rx * cr - Math.sin(a) * ry * sr;
+        const ey = Math.cos(a) * rx * sr + Math.sin(a) * ry * cr;
+        pts.push({ x: cx + ex * tx + ey * nx, y: cy + ex * ty + ey * ny });
+      }
+      break;
+    }
+    case 'hoja': {
+      const len = size * (0.9 + noise1(sv + 2) * 0.4);
+      const bow = size * (0.28 + noise1(sv + 3) * 0.28);
+      for (let i = 0; i <= 28; i++) {
+        const t2 = i / 28;
+        const a = (t2 * 2 - 1) * len;
+        const p =  bow * Math.sin(t2 * Math.PI);
+        pts.push({ x: cx + a * tx + p * nx, y: cy + a * ty + p * ny });
+      }
+      for (let i = 28; i >= 0; i--) {
+        const t2 = i / 28;
+        const a = (t2 * 2 - 1) * len;
+        const p = -bow * Math.sin(t2 * Math.PI);
+        pts.push({ x: cx + a * tx + p * nx, y: cy + a * ty + p * ny });
+      }
+      break;
+    }
+    case 'gota': {
+      const h = size * 1.1, w = size * 0.55;
+      for (let i = 0; i < 32; i++) {
+        const a    = (i / 32) * Math.PI * 2;
+        const r    = w * (0.6 + 0.4 * Math.cos(a));
+        const alng = Math.cos(a + Math.PI * 0.5) * h * 0.5;
+        const perp = Math.sin(a) * r;
+        pts.push({ x: cx + alng * tx + perp * nx, y: cy + alng * ty + perp * ny });
+      }
+      break;
+    }
+    case 'triangulo': {
+      const baseAngle = noise1(sv + 4) * Math.PI * 2;
+      const verts = [0, 1, 2].map(i => {
+        const a = baseAngle + (i / 3) * Math.PI * 2;
+        const r = size * (0.85 + noise1(sv + i) * 0.3);
+        return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r };
+      });
+      for (let i = 0; i < 3; i++) {
+        const va = verts[i], vb = verts[(i + 1) % 3];
+        const dl = Math.hypot(vb.x - va.x, vb.y - va.y) || 1;
+        const bw = size * 0.18 * (noise1(sv + i + 7) < 0.5 ? 1 : -1);
+        const mx = (va.x + vb.x) / 2 - (vb.y - va.y) / dl * bw;
+        const my = (va.y + vb.y) / 2 + (vb.x - va.x) / dl * bw;
+        for (let j = 0; j < 12; j++) {
+          const mt = j / 12;
+          pts.push({
+            x: (1-mt)*(1-mt)*va.x + 2*(1-mt)*mt*mx + mt*mt*vb.x,
+            y: (1-mt)*(1-mt)*va.y + 2*(1-mt)*mt*my + mt*mt*vb.y,
+          });
+        }
+      }
+      break;
+    }
+    case 'compuesta': {
+      // Forma cerrada: dos perfiles de desvío enfrentados a lo largo del eje tangente.
+      // El lado A usa un perfil, el lado B usa otro — misma lógica que deviationPts
+      // pero como objeto autónomo sin curva base.
+      const PROF_TYPES = ['bezier','arc','angular','catenary','spiral','clothoid','lissajous','epitrochoid','pursuit'];
+      const idxA  = Math.floor(noise1(sv)       * PROF_TYPES.length);
+      const idxB  = Math.floor(noise1(sv + 3.7) * PROF_TYPES.length);
+      const pTypeA = PROF_TYPES[idxA];
+      const pTypeB = PROF_TYPES[(idxB + 2) % PROF_TYPES.length]; // garantiza diferente
+      const len    = size * (1.0 + noise1(sv + 1.1) * 0.6);
+      const ampA   = size * (0.5  + noise1(sv + 2.2) * 0.5);
+      const ampB   = size * (0.3  + noise1(sv + 4.4) * 0.4);
+      const steps  = 30;
+      // Lado A (normal positiva)
+      for (let i = 0; i <= steps; i++) {
+        const t  = i / steps;
+        const along = (t * 2 - 1) * len;
+        const tHalf = t < 0.5 ? t * 2 : (1 - t) * 2;
+        const off = ampA * profile(pTypeA, tHalf, sv);
+        pts.push({ x: cx + along * tx + off * nx, y: cy + along * ty + off * ny });
+      }
+      // Lado B (normal negativa, recorrido inverso para cerrar)
+      for (let i = steps; i >= 0; i--) {
+        const t  = i / steps;
+        const along = (t * 2 - 1) * len;
+        const tHalf = t < 0.5 ? t * 2 : (1 - t) * 2;
+        const off = ampB * profile(pTypeB, tHalf, sv);
+        pts.push({ x: cx + along * tx - off * nx, y: cy + along * ty - off * ny });
+      }
+      break;
+    }
   }
   return pts;
 }
@@ -609,17 +712,44 @@ function generateSurfaces() {
     // Divide el rango 0.2–0.8 en surfPatchCount franjas para peakT
     const peakStep = 0.6 / surfPatchCount;
 
+    const FLOAT_TYPES = ['disco', 'hoja', 'gota', 'triangulo', 'compuesta'];
+
     for (let pi = 0; pi < surfPatchCount; pi++) {
-      // Dividir la curva en zonas para que los parches no se solapen
+      const seedVal = srng() * 100;
+
+      // ~40% de probabilidad de generar una forma flotante (estilo Calder)
+      // en lugar de un parche de trayecto
+      if (srng() < 0.40) {
+        const t   = 0.1 + srng() * 0.8;
+        const idx = Math.round(t * (pts.length - 1));
+        const iA  = Math.max(0, idx - 1);
+        const iB  = Math.min(pts.length - 1, idx + 1);
+        const tdx = pts[iB].x - pts[iA].x;
+        const tdy = pts[iB].y - pts[iA].y;
+        const tl  = Math.hypot(tdx, tdy) || 1;
+        const ttx = tdx / tl, tty = tdy / tl;
+        const tnx = -tdy / tl, tny = tdx / tl;
+        const side   = srng() < 0.5 ? 1 : -1;
+        const offset = side * (surfAmpMax * 0.35 + srng() * surfAmpMax * 0.5);
+        const fcx    = pts[idx].x + tnx * offset;
+        const fcy    = pts[idx].y + tny * offset;
+        const fsize  = surfAmpMax * (0.28 + srng() * 0.45);
+        const ftype  = FLOAT_TYPES[Math.floor(srng() * FLOAT_TYPES.length)];
+        const polygon = makeFloatShape(fcx, fcy, fsize, ttx, tty, tnx, tny, ftype, seedVal);
+        if (polygon.length >= 3) {
+          surfaces.push({ polygon, color: CURVE_COLORS[crv.type] || '#ffffff' });
+        }
+        continue;
+      }
+
+      // Parche de trayecto — forma calculada desde la desviación del segmento
       const zoneA  = pi / surfPatchCount;
       const zoneB  = (pi + 1) / surfPatchCount;
       const margin = 0.08;
       const tRange = (zoneB - zoneA) - margin * 2;
       if (tRange < 0.1) continue;
 
-      // t1: inicio del parche dentro de la zona
       const t1     = zoneA + margin + srng() * tRange * 0.5;
-      // longitud del segmento: 20–40% de la longitud total de la curva
       const segLen = 0.20 + srng() * 0.20;
       const t2     = Math.min(t1 + segLen, zoneB - margin);
       if (t2 <= t1 + 0.06) continue;
@@ -633,24 +763,18 @@ function generateSurfaces() {
       const segDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
       if (segDist < 12) continue;
 
-      // Amplitud: limitada por surfAmpMax y por la longitud del segmento
       const ampRaw = surfAmpMax * (0.45 + srng() * 0.55);
       const amp    = Math.min(ampRaw, segDist * 0.55);
       const side   = srng() < 0.5 ? 1 : -1;
 
-      // typeA (salida) y typeB (vuelta) distintos — round-robin sobre el pool barajado
       const typeA   = available[pi * 2       % available.length];
       const typeB   = available[(pi * 2 + 1) % available.length];
-      const seedVal = srng() * 100;
-      // peakT: franja exclusiva por parche → formas siempre distintas
       const peakT   = 0.2 + pi * peakStep + srng() * peakStep * 0.85;
 
       const segPts = pts.slice(i1, i2 + 1);
       const devPts = deviationPts(segPts, amp * side, typeA, typeB, seedVal, peakT);
 
-      // Polígono cerrado: segmento original avanza, desvío retrocede
       const polygon = [...segPts, ...devPts.slice().reverse()];
-
       surfaces.push({ polygon, color: CURVE_COLORS[crv.type] || '#ffffff' });
     }
   }
@@ -1208,6 +1332,7 @@ document.getElementById('overflowToggle').addEventListener('click', () => {
 document.getElementById('bgToggle').addEventListener('click', () => {
   bgLight = !bgLight;
   document.getElementById('bgTrack').classList.toggle('on', bgLight);
+  document.body.classList.toggle('ui-light', bgLight);
   render();
 });
 
